@@ -1,0 +1,6 @@
+# THIS FILE CANNOT BE READ BY OPCUA_SCAN. FOR REFERENCE ONLY
+
+  # Empty path
+UADiscovery  # Path for well-known LDS addresses defined in OPC UA Specifications Part6
+
+# Feel free to add more well known addresses to these files !

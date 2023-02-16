@@ -1,0 +1,4 @@
+asyncua
+ipparser
+cryptography
+tabulate
