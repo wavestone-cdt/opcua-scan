@@ -229,6 +229,64 @@ def generate_hello_report(args, target_counter, detected_server_counter):
 
 
 ##############################################################################
+#                        read_data script section                        #
+##############################################################################
+
+async def read_data(args):
+    """
+    Starts reading data
+    """
+    # Init
+    targets = build_targets(args)
+    targets_report_object = []
+    # If there is more than one target, raise an error
+    if len(targets)>1:
+        pretty_log(
+            f"Only one target is supported for read_data",
+               lvl="error"
+            )
+        return False
+    print(str(targets))
+
+    # Start scan
+    for target in targets:
+        client = Client(target)
+        global MSG_PREFIX
+        MSG_PREFIX = f"{target} - "
+
+        if await precheck_connection(client):
+            print("\n")
+            pretty_log(
+                "Valid OPC UA response, starting analysis",
+                lvl="success"
+            )
+
+            target_report = {"target": target, "endpoints": [], "tree": []}
+            targets_report_object.append(target_report)
+
+            endpoints = await get_endpoints(client)
+            iterate_endpoints(endpoints, target_report)
+            
+            if await check_authentication(client, args, target_report):
+                try:
+                    await read_server_nodes(client, args, target_report)
+                except Exception:
+                    continue
+
+        else:
+            print("\n")
+            pretty_log("No OPC UA response, stop scan", lvl="error")
+
+
+
+    # Write the scan results in the verbose file
+    if args.output_verbose:
+        with open(args.output_verbose, "w", encoding="utf-8") as outfile:
+            json.dump(targets_report_object, outfile)
+
+
+
+##############################################################################
 #                        Server_config script section                        #
 ##############################################################################
 
@@ -385,6 +443,26 @@ def generate_config_report(
         tabulate(table, tablefmt=args.table_format, headers=["", "Results"])
     )
 
+def generate_reading_report(
+    args,
+    targets_report_object
+):
+    """
+    Displays a summary of the read_data scan results
+    """
+
+    table = []
+
+    # Nodes & values
+    for node in targets_report_object:
+        table.append([node["NodeId"], node["Value"]])
+
+    print("\n")
+    print(
+        tabulate(table, tablefmt='outline', headers=["Node", "Value"])
+    )
+
+
 
 def build_targets(args):
     """
@@ -446,6 +524,30 @@ async def check_authentication(client, args, target_report):
         pretty_log("Client setup failed", lvl="error")
         return False
 
+
+async def read_server_nodes(client, args, target_report):
+    """
+    Tries to retrieves server nodes
+    """
+    try:
+        await client.connect()
+        root = (
+            client.get_root_node() if not args.root_node
+            else client.get_node(args.root_node)
+        )
+
+        # Iterate over all nodes and check permissions
+        pretty_log("List of nodes and values:")
+        await read_node_values(args, root, target_report["tree"])
+        await client.disconnect()
+
+    except Exception as err:
+        pretty_log(f"Could not obtain information: {err}", lvl="error")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise err
 
 async def get_server_nodes(client, args, target_report):
     """
@@ -720,6 +822,78 @@ async def traverse_tree(args, root, targets_report_object_tree):
     except ua.uaerrors._auto.BadNodeIdUnknown:
         pass
 
+async def read_node_values(args, root, targets_report_object_tree):
+    """
+   Get all nodes in subtree from given root and logs
+    relevant information
+    """
+
+    # Init default attributes
+    node = {
+        "NodeId": "BadNodeIdUnknown",
+        "NodeClass": "BadNodeIdUnknown",
+        "BrowseName": "BadNodeIdUnknown",
+        "Value": "BadAttributeIdInvalid",
+        "UserRolePermissions": "BadAttributeIdInvalid",
+    }
+
+    child_nodes = await root.get_children()
+
+    for child_node in child_nodes:
+              
+        # Retrieve default attributes
+        try:
+            node["NodeId"] = child_node.nodeid.to_string()
+            browse_name = await child_node.read_browse_name()
+            node["BrowseName"] = browse_name.to_string()
+            node_class = int_to_node_class(await child_node.read_node_class())
+            node["NodeClass"] = node_class.name
+
+            # Description, not working as expected
+            #desc = await child_node.read_attribute(ua.AttributeIds.Description)
+
+            # Value
+            try:
+                node["Value"] = ua_utils.val_to_string(
+                    await child_node.read_value(), truncate=True
+                )
+            
+            except ua.uaerrors._auto.BadAttributeIdInvalid:
+                pass
+            except Exception as err:
+                node["Value"] = str(err)
+            targets_report_object_tree.append(node)
+
+            # UserRolePermissions
+            try:
+                user_role_permissions = await child_node.read_attribute(
+                    ua.AttributeIds.UserRolePermissions
+                )
+                node["UserRolePermissions"] = (
+                    user_role_permissions.Value.Value
+                )
+            except ua.uaerrors._auto.BadAttributeIdInvalid:
+                pass
+            except Exception as err:
+                node["UserRolePermissions"] = str(err)
+
+            
+            # Display nodes
+            pretty_log(
+                f"Name: {browse_name.to_string()} - "
+                f"Id: {child_node.nodeid.to_string()} - "
+                f"""Value: \033[92m\033[1m{node["Value"]}\033[0m"""
+            )
+
+        except ua.uaerrors._auto.BadNodeIdUnknown:
+            pass
+    generate_reading_report(
+        args,
+        targets_report_object_tree
+    )
+        
+        
+
 
 ##############################################################################
 #                                Main section                                #
@@ -738,6 +912,18 @@ async def main():
 
     if args.command == "hello":
         await run_hello(args)
+
+    elif args.command == "read_data":
+               
+        if args.root_node:
+            # Converts root_id to int if possible
+            try:
+                root_id = int(args.root_node)
+                args.root_node = root_id
+            except Exception:
+                pass
+        
+        await read_data(args)
 
     elif args.command == "server_config":
         # Handle warning if additional node attributes are badly configured
@@ -798,6 +984,9 @@ def init_arg_parser():
 
     # Creating the parser for the "server_config" command
     init_server_config_arg_parser(subparsers)
+
+    # Creating the parser for the "read_data" command
+    init_read_data_arg_parser(subparsers)
 
     return parser
 
@@ -1001,6 +1190,96 @@ def init_server_config_arg_parser(subparsers):
         help=(
             "The format of the summary table (see tabulate documentation "
             "for the list of accepted formats, e.g. outline, grid...)"
+        )
+    )
+
+def init_read_data_arg_parser(subparsers):
+    """
+    Init read_data  command subparser
+    """
+    parser_read_data = subparsers.add_parser(
+        "read_data",
+        help=(
+            "Retrieves information about the configuration of discovered OPC "
+            "UA servers"
+        )
+    )
+    parser_read_data.add_argument(
+        "-t",
+        "--targets",
+        help=(
+            "The target urls (e.g. opc.tcp://127.0.01:4840/ServerName, "
+            "opc.tcp://127.0.01:4841/). It can be a path to the output file "
+            "generated by the opcua_scan hello command. (e.g "
+            "/path/to/hello_output.json)"
+        ),
+        required=True
+    )
+    parser_read_data.add_argument(
+        "-a",
+        "--authentication",
+        help="The authentication method to be used (default: Anonymous)",
+        choices=valid_auth_methods,
+        default=valid_auth_methods[0]  # Anonymous
+    )
+    parser_read_data.add_argument(
+        "-u",
+        "--username",
+        help="The username for the authentication",
+        default=""
+    )
+    parser_read_data.add_argument(
+        "-p",
+        "--password",
+        help="The password for the authentication",
+        default=""
+    )
+    parser_read_data.add_argument(
+        "-c",
+        "--certificate",
+        help="The certificate for the authentication and/or encryption",
+        default=""
+    )
+    parser_read_data.add_argument(
+        "-pk",
+        "--private_key",
+        help="The private key used for the authentication and/or encryption",
+        default=""
+    )
+    parser_read_data.add_argument(
+        "-m",
+        "--mode",
+        choices=list(valid_security_modes.keys()),
+        default="None",
+        help=(
+            "The security mode of the endpoint to which to connect "
+            "(default: None)"
+        )
+    )
+    parser_read_data.add_argument(
+        "-po",
+        "--policy",
+        choices=list(valid_security_policies.keys()),
+        default="None",
+        help=(
+            "The security policy of the endpoint to which to connect "
+            "(default: None)"
+        )
+    )
+    parser_read_data.add_argument(
+        "-r",
+        "--root_node",
+        help=(
+            "The ID of the node from which iterations will start "
+            "(e.g. 2253, 'i=2253', 'ns=6;s=MyObjectsFolder')"
+        )
+    )
+    parser_read_data.add_argument(
+        "-o",
+        "--output_verbose",
+        help=(
+            "The path to a file where more information about the server will "
+            "be written (JSON format)"
         )
     )
 
