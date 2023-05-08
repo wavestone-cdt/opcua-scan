@@ -4,6 +4,8 @@
 2. [Installation](#installation)
 3. [Hello command (discovery)](#hello-command-discovery)
 4. [Server_config command](#server_config-command)
+5. [read_data command] (#read_data-command)
+6. [write_data command] (#write_data-command)
 
 <br>
 
@@ -202,7 +204,7 @@ opcua_scan.py server_config -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer
 ```
 <br>
 
-# read_data commande
+# read_data command
 
 **This command allows to read data from an OPC-UA server**
 
@@ -297,7 +299,7 @@ opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a
 ```
 <br>
 
-# write_data commande
+# write_data command
 
 **This command allows to write data to an OPC-UA server**
 
