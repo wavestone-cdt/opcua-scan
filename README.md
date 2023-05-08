@@ -201,3 +201,154 @@ opcua_scan.py server_config -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer
 ./opcua_scan.py server_config -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -tfmt latex
 ```
 <br>
+
+# read_data commande
+
+**This command allows to read data from an OPC-UA server**
+
+<br>
+
+## Display read_data command help
+
+```
+./opcua_scan.py read_data -h
+```
+
+
+## How to read data
+
+Read at the root
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer'
+```
+
+Browse a location ('ns=2;s=XXX.YYY') and read data :
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -r 'ns=2;s=XXX.YYY'
+```
+
+Read data at a specific location without browsing :
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -r 'ns=2;s=XXX.YYY' --single True
+```
+
+
+<br>
+
+### Options
+
+- Authentication (`-a, --authentication`) : The authentication method to be used (default: Anonymous)
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Anonymous
+```
+<br>
+
+- Username (`-u, --username`) and password (`-p, --password`) : The username and password for the authentication
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password
+```
+<br>
+
+- Security mode (`-m, --mode`) and policy (`-po, --policy`) : The security mode and associated policy of the targeted endpoint
+- Certificate (`-c, --certificate`) and private key (`-pk, --private_key`) : The certificate and the associated private key for the authentication and/or encryption
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password -m SignAndEncrypt -po Basic256Sha256 -c certificate.pem -pk private_key.pem
+
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Certificate -c certificate.pem -pk private_key.pem
+
+```
+<br>
+
+- Find writable nodes (`-nw, nodes_writable`) and executable methods (`ne, nodes_executable`) (successful authentication is required) :
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password -nw -ne
+```
+<br>
+
+- Change root node (`-r, root_node`) : the search for writable nodes and executable methods will start from the selected root node
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password -nw -ne -r 2253
+
+opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password -nw -ne -r 'i=2253'
+
+opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password -nw -ne -r 'ns=6;s=MyObjectsFolder'
+
+opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password -nw -ne -r 'ns=3;i=1001'
+```
+<br>
+
+- Output (`-o, --output`) : store more information about the scanned servers in a file (JSON format)
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -nw -o ./file_output.json
+```
+<br>
+
+- Retrieves additional node attributes (`-na, node_attributes`) (successful authentication is required, and a file output must be configured). The list of valid attributes that can be retrieved is:
+    - NodeId, NodeClass, BrowseName, DisplayName, Description, WriteMask, UserWriteMask, IsAbstract, Symmetric, InverseName, ContainsNoLoops, EventNotifier, Value, DataType, ValueRank, ArrayDimensions, AccessLevel, UserAccessLevel, MinimumSamplingInterval, Historizing, Executable, UserExecutable, DataTypeDefinition, RolePermissions, UserRolePermissions, AccessRestrictions, AccessLevelEx
+
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password -na Historizing -na Description -o file_output.json
+```
+<br>
+
+- Single mode (`--single`) : Just read the data at the address without browsing
+```
+./opcua_scan.py read_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -r 'ns=3;i=1001' --single True
+```
+<br>
+
+# write_data commande
+
+**This command allows to write data to an OPC-UA server**
+
+<br>
+
+## Display write_data command help
+
+```
+./opcua_scan.py write_data -h
+```
+
+
+## How to write data
+
+**Only working for Boolean data at the moment**
+
+
+Browse a location ('ns=2;s=XXX.YYY') and read data :
+```
+./opcua_scan.py write_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -r 'ns=2;s=XXX.YYY' --data True
+```
+
+<br>
+
+### Options
+
+- Authentication (`-a, --authentication`) : The authentication method to be used (default: Anonymous)
+```
+./opcua_scan.py write_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Anonymous
+```
+<br>
+
+- Username (`-u, --username`) and password (`-p, --password`) : The username and password for the authentication
+```
+./opcua_scan.py write_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password
+```
+<br>
+
+- Security mode (`-m, --mode`) and policy (`-po, --policy`) : The security mode and associated policy of the targeted endpoint
+- Certificate (`-c, --certificate`) and private key (`-pk, --private_key`) : The certificate and the associated private key for the authentication and/or encryption
+```
+./opcua_scan.py write_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Username -u john -p password -m SignAndEncrypt -po Basic256Sha256 -c certificate.pem -pk private_key.pem
+
+./opcua_scan.py write_data -t 'opc.tcp://127.0.0.1:53530/OPCUA/SimulationServer' -a Certificate -c certificate.pem -pk private_key.pem
+
+```
+<br>
+
+- Node address node (`-r, root_node`) : Write at this adress
+
+<br>
+
+- Data (`--data`) : Data to be written
+```Only works with BOOL ("True" or "False") at the moment```

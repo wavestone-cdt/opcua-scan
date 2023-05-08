@@ -229,7 +229,7 @@ def generate_hello_report(args, target_counter, detected_server_counter):
 
 
 ##############################################################################
-#                        read_data script section                        #
+#                        read_data script section                            #
 ##############################################################################
 
 async def read_data(args):
@@ -284,10 +284,61 @@ async def read_data(args):
         with open(args.output_verbose, "w", encoding="utf-8") as outfile:
             json.dump(targets_report_object, outfile)
 
+##############################################################################
+#                        write_data script section                           #
+#              Only works in a very limited way for the workshop             #
+##############################################################################
+
+async def write_data(args):
+    """
+    Starts writing data
+    """
+    # Init
+    targets = build_targets(args)
+    targets_report_object = []
+    # If there is more than one target, raise an error
+    if len(targets)>1:
+        pretty_log(
+            f"Only one target is supported for write_data",
+               lvl="error"
+            )
+        return False
+    print(str(targets))
+
+    # Start scan
+    for target in targets:
+        client = Client(target)
+        global MSG_PREFIX
+        MSG_PREFIX = f"{target} - "
+
+        if await precheck_connection(client):
+            print("\n")
+            pretty_log(
+                "Valid OPC UA response, starting analysis",
+                lvl="success"
+            )
+
+            target_report = {"target": target, "endpoints": [], "tree": []}
+            targets_report_object.append(target_report)
+
+            endpoints = await get_endpoints(client)
+            iterate_endpoints(endpoints, target_report)
+            
+            if await check_authentication(client, args, target_report):
+                try:
+                    await write_server_nodes(client, args)
+                except Exception:
+                    continue
+
+        else:
+            print("\n")
+            pretty_log("No OPC UA response, stop scan", lvl="error")
+
 
 
 ##############################################################################
 #                        Server_config script section                        #
+#                                                                            #
 ##############################################################################
 
 async def run_server_config(args):
@@ -455,11 +506,11 @@ def generate_reading_report(
 
     # Nodes & values
     for node in targets_report_object:
-        table.append([node["NodeId"], node["Value"]])
+        table.append([node["NodeId"], node["BrowseName"], node["Value"]])
 
     print("\n")
     print(
-        tabulate(table, tablefmt='outline', headers=["Node", "Value"])
+        tabulate(table, tablefmt='outline', headers=["Node", "Name", "Value"])
     )
 
 
@@ -548,6 +599,94 @@ async def read_server_nodes(client, args, target_report):
         except Exception:
             pass
         raise err
+    
+async def write_server_nodes(client, args):
+    """
+    Tries to write server nodes
+    """
+    try:
+        await client.connect()
+        supplied_node = client.get_node(args.root_node)
+        # Read current value
+        try:
+            browse_name = await supplied_node.read_browse_name()
+            # Value
+            try:
+                value = ua_utils.val_to_string(
+                    await supplied_node.read_value(), truncate=True
+                )
+            
+            except ua.uaerrors._auto.BadAttributeIdInvalid:
+                pass
+            except Exception as err:
+                value = str(err)
+        
+        except Exception as err:
+            pretty_log(f"Could not obtain information: {err}", lvl="error")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            raise err
+    except Exception as err:
+            pretty_log(f"Could not obtain information: {err}", lvl="error")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            raise err
+    pretty_log(
+        f"Previous value at address "
+        f"{supplied_node.nodeid.to_string()}: "
+        f"""\033[92m\033[1m{value}\033[0m"""
+    )
+
+    # Setting the new value
+
+    # Only works for BOOL values at the moment
+    if(args.data == 'True'):
+        data_to_be_written = True
+    elif(args.data == 'False'):
+        data_to_be_written = False
+    else:
+        pretty_log("Only supported data is True or False")
+
+    try:
+        # Kepware is weird
+        #await supplied_node.write_value(args.data, varianttype=None)
+        #await supplied_node.write_value(False)
+
+        dv = ua.DataValue(ua.Variant(data_to_be_written, ua.VariantType.Boolean))
+        #dv.Dimensions=None
+        #dv.is_array=False
+        #dv.StatusCode_=StatusCode(value=0)
+        #dv.ServerTimestamp = None
+        #dv.SourceTimestamp = None
+        #dv.SourcePicoseconds= None
+        #dv.ServerPicoseconds= None
+        await supplied_node.set_value(dv)
+        pretty_log(f"Successful write of data \033[92m\033[1m{data_to_be_written}\033[0m at address \033[92m\033[1m{supplied_node}\033[0m")
+
+        # Other test
+        #set_value = ua.value_to_datavalue(1, varianttype=None)
+        #print(set_value)
+
+        # Request from opcua-client GUI that works
+        #INFO - Writing attribute 13 of node ns=2;s=ModbusPLC-10-3-0-150.Device2.part_1_up with value:
+        #DataValue(Value=Variant(Value=True, VariantType=<VariantType.Boolean: 1>, Dimensions=None, is_array=False), StatusCode_=StatusCode(value=0), SourceTimestamp=None, ServerTimestamp=None, SourcePicoseconds=None, ServerPicoseconds=None)')
+    except Exception as err:
+            pretty_log(f"Error in writing to node: {err}", lvl="error")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            raise err
+
+    # Reading the node value again
+
+
+    await client.disconnect()
+
 
 async def get_server_nodes(client, args, target_report):
     """
@@ -827,20 +966,23 @@ async def read_node_values(args, root, targets_report_object_tree):
    Get all nodes in subtree from given root and logs
     relevant information
     """
-
-    # Init default attributes
-    node = {
-        "NodeId": "BadNodeIdUnknown",
-        "NodeClass": "BadNodeIdUnknown",
-        "BrowseName": "BadNodeIdUnknown",
-        "Value": "BadAttributeIdInvalid",
-        "UserRolePermissions": "BadAttributeIdInvalid",
-    }
-
-    child_nodes = await root.get_children()
-
+    if(args.single):
+        child_nodes = []
+        child_nodes.append(root)
+    else:
+        child_nodes = await root.get_children()
+        targets_report_object_tree = []
     for child_node in child_nodes:
-              
+        
+        # Init default attributes
+        node = {
+            "NodeId": "BadNodeIdUnknown",
+            "NodeClass": "BadNodeIdUnknown",
+            "BrowseName": "BadNodeIdUnknown",
+            "Value": "BadAttributeIdInvalid",
+            "UserRolePermissions": "BadAttributeIdInvalid",
+        }   
+        
         # Retrieve default attributes
         try:
             node["NodeId"] = child_node.nodeid.to_string()
@@ -862,8 +1004,8 @@ async def read_node_values(args, root, targets_report_object_tree):
                 pass
             except Exception as err:
                 node["Value"] = str(err)
-            targets_report_object_tree.append(node)
-
+            #print(node)
+            
             # UserRolePermissions
             try:
                 user_role_permissions = await child_node.read_attribute(
@@ -877,23 +1019,26 @@ async def read_node_values(args, root, targets_report_object_tree):
             except Exception as err:
                 node["UserRolePermissions"] = str(err)
 
-            
             # Display nodes
             pretty_log(
                 f"Name: {browse_name.to_string()} - "
                 f"Id: {child_node.nodeid.to_string()} - "
                 f"""Value: \033[92m\033[1m{node["Value"]}\033[0m"""
             )
+        
+            #print(node)
+           
 
         except ua.uaerrors._auto.BadNodeIdUnknown:
             pass
+
+        targets_report_object_tree.append(node)
+
     generate_reading_report(
         args,
         targets_report_object_tree
     )
         
-        
-
 
 ##############################################################################
 #                                Main section                                #
@@ -924,6 +1069,18 @@ async def main():
                 pass
         
         await read_data(args)
+    
+    elif args.command == "write_data":
+               
+        if args.root_node:
+            # Converts root_id to int if possible
+            try:
+                root_id = int(args.root_node)
+                args.root_node = root_id
+            except Exception:
+                pass
+        
+        await write_data(args)
 
     elif args.command == "server_config":
         # Handle warning if additional node attributes are badly configured
@@ -987,6 +1144,9 @@ def init_arg_parser():
 
     # Creating the parser for the "read_data" command
     init_read_data_arg_parser(subparsers)
+
+    # Creating the parser for the "write_data" command
+    init_write_data_arg_parser(subparsers)
 
     return parser
 
@@ -1282,7 +1442,108 @@ def init_read_data_arg_parser(subparsers):
             "be written (JSON format)"
         )
     )
+    parser_read_data.add_argument(
+        "--single",
+        help="Read a single address without browsing",
+        default=""
+    )
 
+def init_write_data_arg_parser(subparsers):
+    """
+    Init read_data  command subparser
+    """
+    parser_write_data = subparsers.add_parser(
+        "write_data",
+        help=(
+            "Writes data to nodes"
+        )
+    )
+    parser_write_data.add_argument(
+        "-t",
+        "--targets",
+        help=(
+            "The target urls (e.g. opc.tcp://127.0.01:4840/ServerName, "
+            "opc.tcp://127.0.01:4841/). It can be a path to the output file "
+            "generated by the opcua_scan hello command. (e.g "
+            "/path/to/hello_output.json)"
+        ),
+        required=True
+    )
+    parser_write_data.add_argument(
+        "-a",
+        "--authentication",
+        help="The authentication method to be used (default: Anonymous)",
+        choices=valid_auth_methods,
+        default=valid_auth_methods[0]  # Anonymous
+    )
+    parser_write_data.add_argument(
+        "-u",
+        "--username",
+        help="The username for the authentication",
+        default=""
+    )
+    parser_write_data.add_argument(
+        "-p",
+        "--password",
+        help="The password for the authentication",
+        default=""
+    )
+    parser_write_data.add_argument(
+        "-c",
+        "--certificate",
+        help="The certificate for the authentication and/or encryption",
+        default=""
+    )
+    parser_write_data.add_argument(
+        "-pk",
+        "--private_key",
+        help="The private key used for the authentication and/or encryption",
+        default=""
+    )
+    parser_write_data.add_argument(
+        "-m",
+        "--mode",
+        choices=list(valid_security_modes.keys()),
+        default="None",
+        help=(
+            "The security mode of the endpoint to which to connect "
+            "(default: None)"
+        )
+    )
+    parser_write_data.add_argument(
+        "-po",
+        "--policy",
+        choices=list(valid_security_policies.keys()),
+        default="None",
+        help=(
+            "The security policy of the endpoint to which to connect "
+            "(default: None)"
+        )
+    )
+    parser_write_data.add_argument(
+        "-r",
+        "--root_node",
+        help=(
+            "The ID of the node from which iterations will start "
+            "(e.g. 2253, 'i=2253', 'ns=6;s=MyObjectsFolder')"
+        )
+    )
+    parser_write_data.add_argument(
+        "-o",
+        "--output_verbose",
+        help=(
+            "The path to a file where more information about the server will "
+            "be written (JSON format)"
+        )
+    )
+    parser_write_data.add_argument(
+        "-d",
+        "--data",
+        help=(
+            "Data to be written to the node"
+        ),
+        required=True
+    )
 
 ##############################################################################
 #                            Common utils section                            #
