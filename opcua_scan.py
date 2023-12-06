@@ -641,22 +641,52 @@ async def write_server_nodes(client, args):
         f"""\033[92m\033[1m{value}\033[0m"""
     )
 
-    # Setting the new value
-
-    # Only works for BOOL values at the moment
-    if(args.data == 'True'):
+    data_to_be_written = None
+    variant_type = None
+    print(args.data.lower() == 'true')
+    # Check if the data is a boolean
+    if args.data.lower() == 'true':
+        print('yeah')
         data_to_be_written = True
-    elif(args.data == 'False'):
+        variant_type = ua.VariantType.Boolean
+    elif args.data.lower() == 'false':
         data_to_be_written = False
+        variant_type = ua.VariantType.Boolean
+    
+    # If not a boolean, check if it's an integer
+    elif args.dtype != None:
+        data_to_be_written = int(args.data)
+
+        if(args.dtype == 'UInt16'):
+            variant_type = ua.VariantType.UInt16
+        elif(args.dtype == 'UInt32'):
+            variant_type = ua.VariantType.UInt32
+        elif(args.dtype == 'UInt64'):
+            variant_type = ua.VariantType.UInt64
+        elif(args.dtype == 'Int16'):
+            variant_type = ua.VariantType.Int16
+        elif(args.dtype == 'Int32'):
+            variant_type = ua.VariantType.Int32
+        elif(args.dtype == 'Int64'):
+            variant_type = ua.VariantType.Int64
+        else:
+            pretty_log("Invalid Datatype. Supported datatype are UInt16, UInt32, UInt64, Int16, Int32, and Int64.")
+            pretty_log("For boolean, don't need to specify the datatype. Just put True or False in --data.")
+            return
     else:
-        pretty_log("Only supported data is True or False")
+        pretty_log("Can't determine Datatype. Specify by add '-dt <Datatype>'")
+        pretty_log("For boolean, don't need to specify the datatype. Just put True or False in --data.")
+        return
 
     try:
+        dv = ua.DataValue(ua.Variant(data_to_be_written, variant_type))
+        await supplied_node.set_value(dv)
+        pretty_log(f"Successful write of data \033[92m\033[1m{data_to_be_written}\033[0m at address \033[92m\033[1m{supplied_node}\033[0m")
+
         # Kepware is weird
         #await supplied_node.write_value(args.data, varianttype=None)
         #await supplied_node.write_value(False)
-
-        dv = ua.DataValue(ua.Variant(data_to_be_written, ua.VariantType.Boolean))
+        # dv = ua.DataValue(ua.Variant(data_to_be_written, ua.VariantType.Boolean))
         #dv.Dimensions=None
         #dv.is_array=False
         #dv.StatusCode_=StatusCode(value=0)
@@ -664,8 +694,8 @@ async def write_server_nodes(client, args):
         #dv.SourceTimestamp = None
         #dv.SourcePicoseconds= None
         #dv.ServerPicoseconds= None
-        await supplied_node.set_value(dv)
-        pretty_log(f"Successful write of data \033[92m\033[1m{data_to_be_written}\033[0m at address \033[92m\033[1m{supplied_node}\033[0m")
+        # await supplied_node.set_value(dv)
+        # pretty_log(f"Successful write of data \033[92m\033[1m{data_to_be_written}\033[0m at address \033[92m\033[1m{supplied_node}\033[0m")
 
         # Other test
         #set_value = ua.value_to_datavalue(1, varianttype=None)
@@ -674,6 +704,7 @@ async def write_server_nodes(client, args):
         # Request from opcua-client GUI that works
         #INFO - Writing attribute 13 of node ns=2;s=ModbusPLC-10-3-0-150.Device2.part_1_up with value:
         #DataValue(Value=Variant(Value=True, VariantType=<VariantType.Boolean: 1>, Dimensions=None, is_array=False), StatusCode_=StatusCode(value=0), SourceTimestamp=None, ServerTimestamp=None, SourcePicoseconds=None, ServerPicoseconds=None)')
+
     except Exception as err:
             pretty_log(f"Error in writing to node: {err}", lvl="error")
             try:
@@ -1543,6 +1574,13 @@ def init_write_data_arg_parser(subparsers):
             "Data to be written to the node"
         ),
         required=True
+    )
+    parser_write_data.add_argument(
+        "-dt",
+        "--dtype",
+        help=(
+            "Datatype to be written to the node. Only if you want to add integer data. Supported type: Int16, Int32, Int64, UInt16, UInt32, UInt64."
+        )
     )
 
 ##############################################################################
