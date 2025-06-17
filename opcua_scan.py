@@ -326,6 +326,7 @@ async def write_data(args):
             
             if await check_authentication(client, args, target_report):
                 try:
+                    
                     await write_server_nodes(client, args)
                 except Exception:
                     continue
@@ -463,7 +464,7 @@ def generate_config_report(
             security_mode_msg += " (SignAndEncrypt only)"
         else:
             security_mode_msg += " (Sign or SignAndEncrypt)"
-
+    
     # Authentication
     successful_auth_counter = 0
     for target in targets_report_object:
@@ -599,34 +600,43 @@ async def read_server_nodes(client, args, target_report):
         except Exception:
             pass
         raise err
-    
+
+
+
 async def write_server_nodes(client, args):
     """
     Tries to write server nodes
     """
     try:
         await client.connect()
-        supplied_node = client.get_node(args.root_node)
-        # Read current value
+        # If no root node is specified, use the root node
+        supplied_node = (
+            client.get_root_node() if not args.root_node
+            else client.get_node(args.root_node)
+        )
+        
         try:
             browse_name = await supplied_node.read_browse_name()
+            
             # Value
             try:
                 value = ua_utils.val_to_string(
                     await supplied_node.read_value(), truncate=True
+                    
                 )
             
             except ua.uaerrors._auto.BadAttributeIdInvalid:
-                pass
+                value = "BadAttributeIdInvalid"
             except Exception as err:
                 value = str(err)
+            
         
         except Exception as err:
             pretty_log(f"Could not obtain information: {err}", lvl="error")
             try:
                 await client.disconnect()
             except Exception:
-                pass
+                value = "BadNodeIdUnknown"
             raise err
     except Exception as err:
             pretty_log(f"Could not obtain information: {err}", lvl="error")
@@ -635,18 +645,18 @@ async def write_server_nodes(client, args):
             except Exception:
                 pass
             raise err
+
     pretty_log(
         f"Previous value at address "
         f"{supplied_node.nodeid.to_string()}: "
         f"""\033[92m\033[1m{value}\033[0m"""
     )
-
+    
     data_to_be_written = None
     variant_type = None
-    print(args.data.lower() == 'true')
+    
     # Check if the data is a boolean
     if args.data.lower() == 'true':
-        print('yeah')
         data_to_be_written = True
         variant_type = ua.VariantType.Boolean
     elif args.data.lower() == 'false':
@@ -656,7 +666,6 @@ async def write_server_nodes(client, args):
     # If not a boolean, check if it's an integer
     elif args.dtype != None:
         data_to_be_written = int(args.data)
-
         if(args.dtype == 'UInt16'):
             variant_type = ua.VariantType.UInt16
         elif(args.dtype == 'UInt32'):
@@ -669,17 +678,36 @@ async def write_server_nodes(client, args):
             variant_type = ua.VariantType.Int32
         elif(args.dtype == 'Int64'):
             variant_type = ua.VariantType.Int64
+        elif(args.dtype == 'Float'):
+            variant_type = ua.VariantType.Float
+        elif(args.dtype == 'Double'):
+            variant_type = ua.VariantType.Double
         else:
             pretty_log("Invalid Datatype. Supported datatype are UInt16, UInt32, UInt64, Int16, Int32, and Int64.")
             pretty_log("For boolean, don't need to specify the datatype. Just put True or False in --data.")
             return
     else:
-        pretty_log("Can't determine Datatype. Specify by add '-dt <Datatype>'")
-        pretty_log("For boolean, don't need to specify the datatype. Just put True or False in --data.")
-        return
+        try:
+            tmp = await get_data_type(supplied_node)
+            variant_type = await data_type_conversion(tmp.name)
+            if tmp.name == 'UInt16' or tmp.name == 'UInt32' or tmp.name == 'UInt64' or tmp.name == 'Int16' or tmp.name == 'Int32' or tmp.name == 'Int64':
+                data_to_be_written = int(args.data)
+            elif tmp.name == 'Float' or tmp.name == 'Double':
+                data_to_be_written = float(args.data)
+            elif tmp.name == 'String':
+                data_to_be_written = str(args.data)
+            else:
+                data_to_be_written = args.data
+        except Exception as err:
+            pretty_log(f"Could not obtain data type: {err}", lvl="error")
+            
+    
+    
 
     try:
-        dv = ua.DataValue(ua.Variant(data_to_be_written, variant_type))
+        dv = ua.DataValue(ua.Variant(data_to_be_written,variant_type))
+
+        
         await supplied_node.set_value(dv)
         pretty_log(f"Successful write of data \033[92m\033[1m{data_to_be_written}\033[0m at address \033[92m\033[1m{supplied_node}\033[0m")
 
@@ -717,7 +745,6 @@ async def write_server_nodes(client, args):
 
 
     await client.disconnect()
-
 
 async def get_server_nodes(client, args, target_report):
     """
@@ -852,7 +879,7 @@ def iterate_endpoints(endpoints, target_report):
         pretty_log(msg[:-2], lvl="critical" if anonymous_accepted else "")
 
         # Convert certificate in base64 (easier to read in the output file)
-        if target_report:
+        if target_report and endpoint.ServerCertificate:
             endpoint.ServerCertificate = base64.b64encode(
                 endpoint.ServerCertificate
             ).decode("utf-8")
@@ -994,76 +1021,83 @@ async def traverse_tree(args, root, targets_report_object_tree):
 
 async def read_node_values(args, root, targets_report_object_tree):
     """
-   Get all nodes in subtree from given root and logs
+    Get all nodes in subtree from given root and logs
     relevant information
     """
-    if(args.single):
+    if(args.single == True):
         child_nodes = []
         child_nodes.append(root)
     else:
         child_nodes = await root.get_children()
         targets_report_object_tree = []
-    for child_node in child_nodes:
-        
-        # Init default attributes
-        node = {
-            "NodeId": "BadNodeIdUnknown",
-            "NodeClass": "BadNodeIdUnknown",
-            "BrowseName": "BadNodeIdUnknown",
-            "Value": "BadAttributeIdInvalid",
-            "UserRolePermissions": "BadAttributeIdInvalid",
-        }   
-        
-        # Retrieve default attributes
-        try:
-            node["NodeId"] = child_node.nodeid.to_string()
-            browse_name = await child_node.read_browse_name()
-            node["BrowseName"] = browse_name.to_string()
-            node_class = int_to_node_class(await child_node.read_node_class())
-            node["NodeClass"] = node_class.name
-
-            # Description, not working as expected
-            #desc = await child_node.read_attribute(ua.AttributeIds.Description)
-
-            # Value
+    for i in range(args.repeat):
+        for child_node in child_nodes:
+            
+            # Init default attributes
+            node = {
+                "NodeId": "BadNodeIdUnknown",
+                "NodeClass": "BadNodeIdUnknown",
+                "BrowseName": "BadNodeIdUnknown",
+                "Value": "BadAttributeIdInvalid",
+                "UserRolePermissions": "BadAttributeIdInvalid",
+            }   
+            
+            # Retrieve default attributes
             try:
-                node["Value"] = ua_utils.val_to_string(
-                    await child_node.read_value(), truncate=True
+                node["NodeId"] = child_node.nodeid.to_string()
+                browse_name = await child_node.read_browse_name()
+                node["BrowseName"] = browse_name.to_string()
+                node_class = int_to_node_class(await child_node.read_node_class())
+                node["NodeClass"] = node_class.name
+
+                # Description, not working as expected
+                #desc = await child_node.read_attribute(ua.AttributeIds.Description)
+
+                # Value
+                try:
+                    node["Value"] = ua_utils.val_to_string(
+                        await child_node.read_value(), truncate=True
+                    )
+                
+                except ua.uaerrors._auto.BadAttributeIdInvalid:
+                    pass
+                except Exception as err:
+                    node["Value"] = str(err)
+                #print(node)
+                
+                # UserRolePermissions
+                try:
+                    user_role_permissions = await child_node.read_attribute(
+                        ua.AttributeIds.UserRolePermissions
+                    )
+                    node["UserRolePermissions"] = (
+                        user_role_permissions.Value.Value
+                    )
+                except ua.uaerrors._auto.BadAttributeIdInvalid:
+                    pass
+                except Exception as err:
+                    node["UserRolePermissions"] = str(err)
+
+                # DataType
+                try:
+                    datatype = await get_data_type(child_node)
+                except ua.uaerrors._auto.BadAttributeIdInvalid:
+                    datatype = "BadAttributeIdInvalid"
+
+                # Display nodes
+                pretty_log(
+                    f"Name: {browse_name.to_string()} - "
+                    f"Id: {child_node.nodeid.to_string()} - "
+                    f"""Value: \033[92m\033[1m{node["Value"]}\033[0m - """
+                    f"Type: {datatype.name}"
                 )
             
-            except ua.uaerrors._auto.BadAttributeIdInvalid:
+
+            except ua.uaerrors._auto.BadNodeIdUnknown:
                 pass
-            except Exception as err:
-                node["Value"] = str(err)
-            #print(node)
+
+            targets_report_object_tree.append(node)
             
-            # UserRolePermissions
-            try:
-                user_role_permissions = await child_node.read_attribute(
-                    ua.AttributeIds.UserRolePermissions
-                )
-                node["UserRolePermissions"] = (
-                    user_role_permissions.Value.Value
-                )
-            except ua.uaerrors._auto.BadAttributeIdInvalid:
-                pass
-            except Exception as err:
-                node["UserRolePermissions"] = str(err)
-
-            # Display nodes
-            pretty_log(
-                f"Name: {browse_name.to_string()} - "
-                f"Id: {child_node.nodeid.to_string()} - "
-                f"""Value: \033[92m\033[1m{node["Value"]}\033[0m"""
-            )
-        
-            #print(node)
-           
-
-        except ua.uaerrors._auto.BadNodeIdUnknown:
-            pass
-
-        targets_report_object_tree.append(node)
 
     generate_reading_report(
         args,
@@ -1475,9 +1509,31 @@ def init_read_data_arg_parser(subparsers):
     )
     parser_read_data.add_argument(
         "--single",
+        action='store_true',
         help="Read a single address without browsing",
         default=""
     )
+
+    parser_read_data.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help=(
+            "Repeat the reading of the node value this many times. "
+            "Default: 1"
+        )
+    )
+
+    parser_read_data.add_argument(
+        "--wait",
+        type=int,
+        default=0,
+        help=(
+            "Wait this many seconds between each reading. "
+            "Default: 0 (no wait)"
+        )
+    )
+
 
 def init_write_data_arg_parser(subparsers):
     """
@@ -1583,6 +1639,9 @@ def init_write_data_arg_parser(subparsers):
         )
     )
 
+
+
+
 ##############################################################################
 #                            Common utils section                            #
 ##############################################################################
@@ -1680,6 +1739,50 @@ def pretty_log(message, lvl=""):
 
     full_message += MSG_PREFIX + message
     print(full_message)
+
+async def get_data_type(node):
+    tmp= await node.read_data_type()
+    return ua.VariantType(tmp.Identifier)
+
+async def data_type_conversion(dtype):
+    """
+    Converts the data to the specified datatype
+    """
+    if dtype == "Int16":
+        return ua.VariantType.Int16
+    elif dtype == "Int32":
+        return ua.VariantType.Int32
+    elif dtype == "Int64":
+        return ua.VariantType.Int64
+    elif dtype == "UInt16":
+        return ua.VariantType.UInt16
+    elif dtype == "UInt32":
+        return ua.VariantType.UInt32
+    elif dtype == "UInt64":
+        return ua.VariantType.UInt64
+    elif dtype == "String":
+        return ua.VariantType.String
+    elif dtype == "Boolean":
+        return ua.VariantType.Boolean
+    elif dtype == "Float":
+        return ua.VariantType.Float
+    elif dtype == "Double":
+        return ua.VariantType.Double
+    elif dtype == "Byte":
+        return ua.VariantType.Byte
+    elif dtype == "SByte":
+        return ua.VariantType.SByte
+    elif dtype == "DateTime":
+        return ua.VariantType.DateTime
+    else:
+        pretty_log(
+            f"Unsupported data type: {dtype}. "
+            "Supported types: Int16, Int32, Int64, UInt16, UInt32, UInt64, "
+            "String, Boolean, Float, Double, Byte, SByte, DateTime.",
+            lvl="error"
+        )
+        return None
+    
 
 
 ##############################################################################
