@@ -879,10 +879,11 @@ def iterate_endpoints(endpoints, target_report):
         pretty_log(msg[:-2], lvl="critical" if anonymous_accepted else "")
 
         # Convert certificate in base64 (easier to read in the output file)
-        if target_report and endpoint.ServerCertificate:
-            endpoint.ServerCertificate = base64.b64encode(
+        if target_report: 
+            if endpoint.ServerCertificate:
+                endpoint.ServerCertificate = base64.b64encode(
                 endpoint.ServerCertificate
-            ).decode("utf-8")
+                ).decode("utf-8")
             target_report["endpoints"].append(dataclasses.asdict(endpoint))
 
     pretty_log("-" * 40)
@@ -1086,6 +1087,7 @@ async def read_node_values(args, root, targets_report_object_tree):
 
                 # Display nodes
                 pretty_log(
+                    f'Reading node --- '
                     f"Name: {browse_name.to_string()} - "
                     f"Id: {child_node.nodeid.to_string()} - "
                     f"""Value: \033[92m\033[1m{node["Value"]}\033[0m - """
@@ -1097,6 +1099,13 @@ async def read_node_values(args, root, targets_report_object_tree):
                 pass
 
             targets_report_object_tree.append(node)
+        
+        if args.wait:
+            pretty_log(
+                f"Waiting {args.wait} seconds before the next read",
+                lvl="info"
+            )
+            await asyncio.sleep(args.wait)
             
 
     generate_reading_report(
