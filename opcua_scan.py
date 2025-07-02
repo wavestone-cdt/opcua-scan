@@ -246,7 +246,6 @@ async def read_data(args):
                lvl="error"
             )
         return False
-    print(str(targets))
 
     # Start scan
     for target in targets:
@@ -303,7 +302,6 @@ async def write_data(args):
                lvl="error"
             )
         return False
-    print(str(targets))
 
     # Start scan
     for target in targets:
@@ -1064,7 +1062,7 @@ async def read_node_values(args, root, targets_report_object_tree):
                     pass
                 except Exception as err:
                     node["Value"] = str(err)
-                #print(node)
+            
                 
                 # UserRolePermissions
                 try:
@@ -1090,7 +1088,7 @@ async def read_node_values(args, root, targets_report_object_tree):
                     f'Reading node --- '
                     f"Name: {browse_name.to_string()} - "
                     f"Id: {child_node.nodeid.to_string()} - "
-                    f"""Value: \033[92m\033[1m{node["Value"]}\033[0m - """
+                    f"""Value: {node["Value"]} - """
                     f"Type: {datatype.name}"
                 )
             
@@ -1738,13 +1736,13 @@ def pretty_log(message, lvl=""):
     Prints the message and mimic metasploit output
     """
     if lvl == "error":
-        full_message = "\033[91m\033[1m" + "[-] " + "\033[0m"
+        full_message = "[-] "
     elif lvl == "success":
-        full_message = "\033[92m\033[1m" + "[+] " + "\033[0m"
+        full_message = "[+] "
     elif lvl == "critical":
-        full_message = "\033[93m\033[1m" + "[!] " + "\033[0m"
+        full_message = "[!] "
     else:
-        full_message = "\033[94m\033[1m" + "[*] " + "\033[0m"
+        full_message = "[*] "
 
     full_message += MSG_PREFIX + message
     print(full_message)
